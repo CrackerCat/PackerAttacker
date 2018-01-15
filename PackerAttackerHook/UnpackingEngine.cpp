@@ -8,6 +8,10 @@
 #include <assert.h>
 #include <algorithm>
 
+
+
+
+
 UnpackingEngine* UnpackingEngine::instance = NULL;
 
 UnpackingEngine::UnpackingEngine(void)
@@ -60,7 +64,10 @@ void UnpackingEngine::initialize()
     HOOK_GET_ORIG(this, "ntdll.dll", NtAllocateVirtualMemory);
     HOOK_GET_ORIG(this, "ntdll.dll", RtlDecompressBuffer);
     HOOK_GET_ORIG(this, "Kernel32.dll", CreateProcessInternalW);
-
+	
+	HOOK_GET_ORIG(this, "Kernel32.dll", CreateFileTransactedW);
+	HOOK_GET_ORIG(this, "ntdll.dll", NtRollbackTransaction);
+	HOOK_GET_ORIG(this, "ntdll.dll", NtWriteFile);
     
     Logger::getInstance()->write(LOG_INFO, "Finding original function addresses... DONE");
 
@@ -159,7 +166,25 @@ bool UnpackingEngine::isPEMemory(DWORD address)
             return true;
     return false;
 }
+BOOL UnpackingEngine::isPE(LPVOID address) {
+	PIMAGE_DOS_HEADER IDH;
+	IDH = PIMAGE_DOS_HEADER(address);
+	return (IDH->e_magic == IMAGE_DOS_SIGNATURE) ? true : false;
 
+}
+DWORD UnpackingEngine::getPESize(LPVOID address) {
+	PIMAGE_DOS_HEADER IDH;
+	PIMAGE_NT_HEADERS INH;
+	PIMAGE_OPTIONAL_HEADER IOH;
+	IDH = PIMAGE_DOS_HEADER(address);
+	DWORD sizeOfImage = NULL;
+	if (IDH->e_magic == IMAGE_DOS_SIGNATURE)
+	{
+		INH = PIMAGE_NT_HEADERS(DWORD(address) + IDH->e_lfanew);
+		DWORD sizeOfImage = INH->OptionalHeader.SizeOfImage;
+	}
+	return sizeOfImage;
+}
 void UnpackingEngine::startTrackingRemoteMemoryBlock(DWORD pid, DWORD baseAddress, DWORD size, unsigned char* data)
 {
     if (this->remoteMemoryBlocks.find(pid) == this->remoteMemoryBlocks.end())
@@ -317,6 +342,95 @@ NTSTATUS UnpackingEngine::onNtWriteVirtualMemory(HANDLE process, PVOID baseAddre
 
     return ret;
 }
+
+
+
+NTSTATUS UnpackingEngine::onNtWriteFile(
+	IN HANDLE               FileHandle,
+	IN HANDLE               Event OPTIONAL,
+	IN LPVOID      ApcRoutine OPTIONAL,
+	IN PVOID                ApcContext OPTIONAL,
+	OUT LPVOID    IoStatusBlock,
+	IN PVOID                Buffer,
+	IN ULONG                Length,
+	IN PLARGE_INTEGER       ByteOffset OPTIONAL,
+	IN PULONG               Key OPTIONAL)
+{
+	if (this->hooksReady) {
+		
+		Logger::getInstance()->write(LOG_INFO, this->transactionStarted ? "TRANSACTION-NtWriteFile(Handle %d, Buffer %d)\n" : "NONTRANSACTION-PRE-NtWriteFile(Handle %d, Buffer %d)\n", FileHandle, Buffer);
+	}
+
+	if (isPE(Buffer)) {
+		DWORD payloadSize = getPESize(Buffer);
+		Logger::getInstance()->write(LOG_INFO, this->transactionStarted ? "TRANSACTION-NtWriteFile: PE Header found at %d, payload size: %d\n" : "NONTRANSACTION-PRE-NtWriteFile: PE Header found at %d, payload size: %d\n", DWORD(Buffer), payloadSize);
+		char fileName[MAX_PATH];
+		sprintf(fileName, "C:\\dumps\\[%d]_%d_0x%08x_to_0x%08x.WF.DMP", this->processID, GetTickCount(), DWORD(Buffer), DWORD(Buffer) + payloadSize);
+		std::fstream file(fileName, std::ios::out | std::ios::binary);
+		if (file.is_open())
+		{
+			for (int i = 0; i < payloadSize; i++)
+				file.write((const char*)&((char *)Buffer)[i], 1);
+			file.close();
+			Logger::getInstance()->write(LOG_ERROR, "Dumped buffer from NtWriteFile with name '%s'!", fileName);
+		}
+		else
+			Logger::getInstance()->write(LOG_ERROR, "Failed to create dump file with name '%s'!", fileName);	
+	}
+
+
+	auto ret = this->origNtWriteFile(FileHandle, Event, ApcRoutine, ApcContext, IoStatusBlock, Buffer, Length, ByteOffset, Key);
+	//if (this->hooksReady)
+		//Logger::getInstance()->write(LOG_INFO, "PST-NtWriteVirtualMemory(TargetPID %d, Address 0x%08x, Count 0x%08x) RET: 0x%08x\n", GetProcessId(process), baseAddress, (numberOfBytesWritten) ? *numberOfBytesWritten : numberOfBytes, ret);
+
+	if (ret == 0 && this->hooksReady)
+	{
+		//DWORD targetPID = this->getProcessIdIfRemote(process);
+		//if (targetPID)
+		//	this->startTrackingRemoteMemoryBlock(targetPID, (DWORD)baseAddress, (DWORD)numberOfBytes, (unsigned char*)buffer);
+	}
+
+	return ret;
+}
+
+
+
+HANDLE UnpackingEngine::onCreateFileTransactedW(
+	_In_       LPCTSTR               lpFileName,
+	_In_       DWORD                 dwDesiredAccess,
+	_In_       DWORD                 dwShareMode,
+	_In_opt_   LPSECURITY_ATTRIBUTES lpSecurityAttributes,
+	_In_       DWORD                 dwCreationDisposition,
+	_In_       DWORD                 dwFlagsAndAttributes,
+	_In_opt_   HANDLE                hTemplateFile,
+	_In_       HANDLE                hTransaction,
+	_In_opt_   PUSHORT               pusMiniVersion,
+	_Reserved_ PVOID                 pExtendedParameter
+)
+{
+	auto ret = origCreateFileTransactedW(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile, hTransaction, pusMiniVersion, pExtendedParameter);
+	if (this->hooksReady) {
+		this->transactionStarted++;
+		Logger::getInstance()->write(LOG_INFO, "Entering file transaction with handle %d.\n", hTransaction);
+	}
+	return ret;
+}
+
+NTSTATUS UnpackingEngine::onNtRollbackTransaction(
+	_In_ HANDLE  TransactionHandle,
+	_In_ BOOLEAN Wait
+) {
+	auto ret = origNtRollbackTransaction(TransactionHandle, Wait);
+	if (this->hooksReady) {
+		this->transactionStarted--;
+		Logger::getInstance()->write(LOG_INFO, "Rolling back file transaction with handle %d.\n", TransactionHandle);
+	}
+	return ret;
+}
+
+
+
+
 
 BOOL WINAPI UnpackingEngine::onCreateProcessInternalW(
     HANDLE hToken, LPCWSTR lpApplicationName, LPWSTR lpCommandLine,

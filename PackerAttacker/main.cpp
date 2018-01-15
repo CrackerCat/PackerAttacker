@@ -76,7 +76,8 @@ int _tmain(int argc, _TCHAR* argv[])
 
     printf("Process successfully executed! Check 'C:\\dumps\\' for dumped files.\n");
     printf("    '*.WPM.DMP' files are dumps from WriteProcessMemory\n");
-    printf("    '*.DMP' files are dumps of memory that was unexpectedly executed\n");
+	printf("    '*.WF.DMP' files are dumps from NtWriteFile\n");
+	printf("    '*.DMP' files are dumps of memory that was unexpectedly executed\n");
 
 	return 0;
 }

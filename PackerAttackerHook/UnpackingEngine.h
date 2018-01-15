@@ -31,6 +31,7 @@
 #define HOOK_DEFINE_6(reT, reTm, name, arg1, arg2, arg3, arg4, arg5, arg6) _HOOK_DEFINE_INTERNAL(reT, reTm, name, (arg1 a1, arg2 a2, arg3 a3, arg4 a4, arg5 a5, arg6 a6), (a1, a2, a3, a4, a5, a6));
 #define HOOK_DEFINE_7(reT, reTm, name, arg1, arg2, arg3, arg4, arg5, arg6, arg7) _HOOK_DEFINE_INTERNAL(reT, reTm, name, (arg1 a1, arg2 a2, arg3 a3, arg4 a4, arg5 a5, arg6 a6, arg7 a7), (a1, a2, a3, a4, a5, a6, a7));
 #define HOOK_DEFINE_8(reT, reTm, name, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8) _HOOK_DEFINE_INTERNAL(reT, reTm, name, (arg1 a1, arg2 a2, arg3 a3, arg4 a4, arg5 a5, arg6 a6, arg7 a7, arg8 a8), (a1, a2, a3, a4, a5, a6, a7, a8));
+#define HOOK_DEFINE_9(reT, reTm, name, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9) _HOOK_DEFINE_INTERNAL(reT, reTm, name, (arg1 a1, arg2 a2, arg3 a3, arg4 a4, arg5 a5, arg6 a6, arg7 a7, arg8 a8, arg9 a9), (a1, a2, a3, a4, a5, a6, a7, a8, a9));
 #define HOOK_DEFINE_10(reT, reTm, name, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10) _HOOK_DEFINE_INTERNAL(reT, reTm, name, (arg1 a1, arg2 a2, arg3 a3, arg4 a4, arg5 a5, arg6 a6, arg7 a7, arg8 a8, arg9 a9, arg10 a10), (a1, a2, a3, a4, a5, a6, a7, a8, a9, a10));
 #define HOOK_DEFINE_12(reT, reTm, name, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11, arg12) _HOOK_DEFINE_INTERNAL(reT, reTm, name, (arg1 a1, arg2 a2, arg3 a3, arg4 a4, arg5 a5, arg6 a6, arg7 a7, arg8 a8, arg9 a9, arg10 a10, arg11 a11, arg12 a12), (a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12));
 
@@ -56,7 +57,8 @@ public:
 
 private:
     static UnpackingEngine* instance;
-    bool hooksReady, inAllocationHook, simulateDisabledDEP, bypassHooks;
+	bool hooksReady, inAllocationHook, simulateDisabledDEP, bypassHooks;
+	int transactionStarted;
     DWORD processID;
     HookingEngine* hooks;
     SyncLock* lock;
@@ -77,9 +79,13 @@ private:
     void dumpMemoryBlock(TrackedMemoryBlock block, DWORD ep);
     void dumpMemoryBlock(char* fileName, DWORD size, const unsigned char* data);
     bool isSelfProcess(HANDLE process);
+	BOOL isPE(LPVOID address);
+	DWORD getPESize(LPVOID address);
     DWORD getProcessIdIfRemote(HANDLE process);
     ULONG processMemoryBlockFromHook(const char* source, DWORD address, DWORD size, ULONG newProtection, ULONG oldProtection, bool considerOldProtection);
 
+	
+	
     /* NtProtectVirtualMemory hook */
     HOOK_DEFINE_5(NTSTATUS, NTAPI, NtProtectVirtualMemory, HANDLE, PVOID*, PULONG, ULONG, PULONG);
     /* NtWriteVirtualMemory hook */
@@ -105,6 +111,15 @@ private:
     HOOK_DEFINE_6(NTSTATUS, NTAPI, NtAllocateVirtualMemory, HANDLE, PVOID*, ULONG, PULONG, ULONG, ULONG);
     /* NtRtlDecompressBuffer hook*/
     HOOK_DEFINE_6(NTSTATUS, NTAPI, RtlDecompressBuffer, USHORT, PUCHAR, ULONG, PUCHAR, ULONG, PULONG);
+
+
+	/* NtWriteFile hook */
+	HOOK_DEFINE_9(NTSTATUS, NTAPI, NtWriteFile, HANDLE, HANDLE, LPVOID, PVOID, LPVOID, PVOID, ULONG, PLARGE_INTEGER, PULONG);
+
+	/*CreateFileTransacted hook*/
+	HOOK_DEFINE_10(HANDLE, WINAPI, CreateFileTransactedW, LPCTSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE, HANDLE, PUSHORT, PVOID);
+
+	HOOK_DEFINE_2(NTSTATUS, NTAPI, NtRollbackTransaction, HANDLE, BOOLEAN);
 
     /* exception handler for hooking execution on tracked pages */
     long onShallowException(PEXCEPTION_POINTERS info);
