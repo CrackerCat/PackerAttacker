@@ -18,6 +18,7 @@ Compile with Visual Studio 2017 and Detours library. You'll have two files:
 1. PackerAttackerHook.dll - unpacking engine
 2. PackerAttacker.exe - DLL injector that executes malware and injects PackerAttackerHook.dll
 
+Make sure your detours library file is the same version as in the header.
 
 ## Setting up
 
